@@ -8,16 +8,8 @@ from urllib.parse import urljoin, urlparse
 
 
 class WebSpider:
-    """
-    Класс веб-паука для обхода сайта и скачивания страниц.
-    Лейсан, этот класс содержит всю логику работы паука.
-    """
 
     def __init__(self, start_url, min_pages=100, max_depth=3):
-        """
-        Лейсан, инициализация паука.
-        Здесь мы задаём начальные параметры и создаём необходимые структуры данных.
-        """
         self.start_url = start_url
         self.min_pages = min_pages
         self.max_depth = max_depth
@@ -29,21 +21,14 @@ class WebSpider:
         self.csv_file = 'results.csv'
         self.pages_dir = 'downloaded_pages'
 
-        # Создаём директорию для страниц
         if not os.path.exists(self.pages_dir):
             os.makedirs(self.pages_dir)
 
-        # Загружаем уже скачанные страницы
         self.load_existing_data()
 
-        # Настройка обработчика прерываний
         signal.signal(signal.SIGINT, self.signal_handler)
 
     def load_existing_data(self):
-        """
-        Лейсан, этот метод загружает информацию о ранее скачанных страницах из index.txt.
-        Это позволяет продолжить работу с того места, где мы остановились.
-        """
         if os.path.exists(self.index_file):
             with open(self.index_file, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -64,20 +49,12 @@ class WebSpider:
             print(f"Загружено {len(self.visited_urls)} уже скачанных страниц")
 
     def signal_handler(self, sig, frame):
-        """
-        Лейсан, этот метод срабатывает при нажатии Ctrl+C.
-        Он сохраняет все данные перед завершением программы.
-        """
         print("\n\nПрерывание программы...")
         self.save_all_data()
         print("Данные сохранены!")
         sys.exit(0)
 
     def is_valid_url(self, url):
-        """
-        Лейсан, этот метод проверяет, является ли ссылка подходящей для скачивания.
-        Мы исключаем изображения, медиафайлы и внешние ссылки.
-        """
         parsed = urlparse(url)
 
         # Проверка на изображения и медиафайлы
@@ -97,10 +74,6 @@ class WebSpider:
         return True
 
     def get_page_content(self, url):
-        """
-        Лейсан, этот метод скачивает содержимое страницы по указанному URL.
-        Он использует requests с заголовком User-Agent для имитации браузера.
-        """
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -108,7 +81,6 @@ class WebSpider:
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
 
-            # Проверка на текстовый контент
             content_type = response.headers.get('Content-Type', '').lower()
             if 'text/html' not in content_type and 'text/plain' not in content_type:
                 print(f"  Пропущено: не текстовый контент ({content_type})")
@@ -120,10 +92,6 @@ class WebSpider:
             return None
 
     def extract_links(self, html, base_url):
-        """
-        Лейсан, этот метод извлекает все ссылки со страницы.
-        Он парсит HTML с помощью BeautifulSoup и находит все теги <a>.
-        """
         soup = BeautifulSoup(html, 'html.parser')
         links = set()
 
@@ -138,7 +106,7 @@ class WebSpider:
 
     def crawl(self):
         """
-        Лейсан, это основной метод обхода сайта.
+        Основной метод обхода сайта.
         Он использует алгоритм BFS (поиск в ширину) с ограничением глубины.
         """
         remaining = self.min_pages - len(self.visited_urls)
@@ -169,12 +137,10 @@ class WebSpider:
             if not html:
                 continue
 
-            # Сохраняем полную HTML страницу
             self.downloaded_count += 1
             filename = f'page_{self.downloaded_count}.html'
             self.save_page(html, filename)
 
-            # Сохраняем информацию о странице, включая родительскую
             self.results.append({
                 'file_number': self.downloaded_count,
                 'url': url,
@@ -196,7 +162,6 @@ class WebSpider:
                 self.save_all_data()
                 print(f"Сохранено {self.downloaded_count} страниц\n")
 
-        # Финальное сохранение
         self.save_all_data()
 
         if self.downloaded_count >= self.min_pages:
@@ -205,10 +170,6 @@ class WebSpider:
             print(f"\nОбход завершён: скачано {self.downloaded_count} страниц (меньше цели, закончились ссылки)")
 
     def save_page(self, content, filename):
-        """
-        Лейсан, этот метод сохраняет содержимое страницы в HTML файл.
-        Файлы сохраняются в папку downloaded_pages.
-        """
         filepath = os.path.join(self.pages_dir, filename)
 
         try:
@@ -218,20 +179,12 @@ class WebSpider:
             print(f"  Ошибка при сохранении {filename}: {e}")
 
     def save_index_txt(self):
-        """
-        Лейсан, этот метод создаёт файл index.txt.
-        В нём хранится номер файла и соответствующая ссылка.
-        """
         with open(self.index_file, 'w', encoding='utf-8') as f:
             for result in sorted(self.results, key=lambda x: x['file_number']):
                 f.write(f"{result['file_number']} {result['url']}\n")
         print(f"Файл {self.index_file} обновлён")
 
     def save_csv(self):
-        """
-        Лейсан, этот метод создаёт файл results.csv.
-        В нём хранится таблица с номером файла, ссылкой, именем файла и родительской страницей.
-        """
         with open(self.csv_file, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['file_number', 'url', 'filename', 'parent']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -242,15 +195,9 @@ class WebSpider:
         print(f"Файл {self.csv_file} обновлён")
 
     def save_all_data(self):
-        """
-        Лейсан, этот метод сохраняет все данные одновременно.
-        Он вызывает методы сохранения для index.txt и results.csv.
-        """
         self.save_index_txt()
         self.save_csv()
 
-
-# Пример использования
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
     MIN_PAGES = 150
