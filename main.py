@@ -5,6 +5,10 @@ import os
 import signal
 import sys
 from urllib.parse import urljoin, urlparse
+import re
+import string
+from collections import defaultdict
+import pymorphy3
 
 
 class WebSpider:
@@ -25,6 +29,11 @@ class WebSpider:
             os.makedirs(self.pages_dir)
 
         self.load_existing_data()
+
+        self.morph = pymorphy3.MorphAnalyzer()
+        self.stopwords = self._load_russian_stopwords()
+        self.tokens_file = 'tokens.txt'
+        self.lemmas_file = 'lemmas.txt'
 
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -198,6 +207,121 @@ class WebSpider:
         self.save_index_txt()
         self.save_csv()
 
+
+    ###Отсюда начинается Задание 2:
+
+    def _load_russian_stopwords(self):
+        """Базовый набор стоп-слов русского языка (предлоги, союзы, частицы, местоимения)"""
+        return {
+            'в', 'на', 'за', 'под', 'над', 'при', 'по', 'о', 'об', 'от', 'до', 'из', 'к', 'с', 'у', 'для',
+            'через', 'после', 'перед', 'между', 'сквозь', 'около', 'вокруг', 'без', 'кроме', 'через',
+            'и', 'или', 'но', 'а', 'да', 'если', 'что', 'чтобы', 'как', 'когда', 'где', 'куда', 'откуда',
+            'потому', 'поэтому', 'зато', 'либо', 'нежели', 'будто', 'словно', 'ибо', 'дабы',
+            'не', 'ни', 'ли', 'же', 'бы', 'вот', 'ведь', 'пусть', 'давай', 'ка', 'то', 'таки',
+            'я', 'ты', 'он', 'она', 'оно', 'мы', 'вы', 'они', 'себя', 'мой', 'твой', 'свой', 'наш', 'ваш',
+            'этот', 'тот', 'какой', 'кто', 'что', 'весь', 'вся', 'всё', 'все', 'сам', 'самый',
+            'быть', 'был', 'была', 'было', 'были', 'есть', 'будет', 'будут', 'это', 'всего', 'весьма',
+            'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять', 'десять',
+            'первый', 'второй', 'третий', 'четвертый', 'пятый'
+        }
+
+    def _is_valid_token(self, token):
+        token = token.strip(string.punctuation + '«»""\'\'–—…').lower()
+
+        if not token or len(token) < 2 or len(token) > 50:
+            return False
+
+        if token in self.stopwords:
+            return False
+
+        if token.isdigit():
+            return False
+
+        if re.search(r'[a-zA-Zа-яА-Я]', token) and re.search(r'\d', token):
+            return False
+
+        if re.match(r'^[<>/{}[\]\\|@#$%^&*=~`]+$', token):
+            return False
+
+        if re.match(r'^([a-zA-Zа-яА-Я])\1{2,}$', token):
+            return False
+
+        if not re.match(r'^[a-zA-Zа-яА-ЯёЁ]+$', token):
+            return False
+
+        return True
+
+    def _extract_text_from_html(self, html_content):
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Удаляем неинформативные теги
+        for tag in soup(['script', 'style', 'meta', 'noscript', 'header', 'footer', 'nav']):
+            tag.decompose()
+
+        text = soup.get_text(separator=' ', strip=True)
+        text = re.sub(r'\s+', ' ', text)
+        return text
+
+    def _tokenize_text(self, text):
+        tokens = re.findall(r'[a-zA-Zа-яА-ЯёЁ]+', text)
+        return tokens
+
+    def _lemmatize_token(self, token):
+        parse = self.morph.parse(token)[0]
+        return parse.normal_form
+
+    def process_downloaded_pages(self):
+        print(f"\nНачинаю обработку {len(self.results)} скачанных страниц...")
+
+        all_tokens = set()
+        lemma_to_tokens = defaultdict(set)
+
+        pages_dir = os.path.join(os.getcwd(), self.pages_dir)
+
+        for result in self.results:
+            filepath = os.path.join(pages_dir, result['filename'])
+
+            if not os.path.exists(filepath):
+                print(f"Файл не найден: {filepath}")
+                continue
+
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+
+                text = self._extract_text_from_html(html_content)
+                raw_tokens = self._tokenize_text(text)
+                for token in raw_tokens:
+                    if self._is_valid_token(token):
+                        all_tokens.add(token)
+                        lemma = self._lemmatize_token(token)
+                        lemma_to_tokens[lemma].add(token)
+
+            except Exception as e:
+                print(f"Ошибка при обработке {result['filename']}: {e}")
+                continue
+
+        self._save_tokens(all_tokens)
+        self._save_lemmas(lemma_to_tokens)
+
+        print(f"Готово! Обработано токенов: {len(all_tokens)}, уникальных лемм: {len(lemma_to_tokens)}")
+        return all_tokens, lemma_to_tokens
+
+    def _save_tokens(self, tokens_set):
+        with open(self.tokens_file, 'w', encoding='utf-8') as f:
+            for token in sorted(tokens_set):
+                f.write(f"{token}\n")
+        print(f"Сохранено {len(tokens_set)} токенов в {self.tokens_file}")
+
+    def _save_lemmas(self, lemma_dict):
+        with open(self.lemmas_file, 'w', encoding='utf-8') as f:
+            # Сортируем по леммам
+            for lemma in sorted(lemma_dict.keys()):
+                tokens = sorted(lemma_dict[lemma])  # Сортируем токены
+                line = f"{lemma} {' '.join(tokens)}\n"
+                f.write(line)
+        print(f"Сохранено {len(lemma_dict)} лемм в {self.lemmas_file}")
+
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
     MIN_PAGES = 150
@@ -209,6 +333,8 @@ if __name__ == "__main__":
 
     spider = WebSpider(START_URL, min_pages=MIN_PAGES, max_depth=MAX_DEPTH)
     spider.crawl()
+
+    spider.process_downloaded_pages()
 
     print("Всё!")
 
