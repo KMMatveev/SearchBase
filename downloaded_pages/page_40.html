@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <title>Хабр Аккаунт</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+    <link rel="stylesheet" href="https://assets.habr.com/account/6970c90a/style/user.css">
+    <link rel="icon" type="image/png" sizes="16x16" href="https://assets.habr.com/account/6970c90a/image/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="https://assets.habr.com/account/6970c90a/image/favicon-32x32.png">
+    <meta name="ga">
+</head>
+<body>
+    <div class="layout">
+        <div class="layout__header">
+    <div class="layout__overlay hidden" id="overlay"></div>
+    <div class="layout__header-inner">
+        <div class="layout__logo-wrapper" id="logo-wrapper">
+            <span class="layout__header-burger" id="burger-control">
+                <svg class="burger-icon">
+                    <use href="/6970c90a/image/icons-sprite.svg#burger"/>
+                </svg>
+            </span>
+            <a href="https://account.habr.com/" class="layout__header-logo">
+                <svg class="logo">
+                    <use href="/6970c90a/image/icons-sprite.svg#logo_ru"/>
+                </svg>
+            </a>
+            <span class="layout__header-dropdown" id="dropdown-control">
+                <svg class="dropdown-icon">
+                    <use href="/6970c90a/image/icons-sprite.svg#dropdown-icon"/>
+                </svg>
+            </span>
+            <div class="dropdown hidden" id="dropdown">
+                <div class="dropdown__header">
+                    Все сервисы Хабра
+                </div>
+                                    <a class="service" href="https://habr.com/?utm_source=habr_account&amp;utm_medium=habr_top_panel">
+                        <div class="service__title">
+                            <svg class="habr-icon">
+                                <use href="/6970c90a/image/icons-sprite.svg#service-habr-ru"/>
+                            </svg>
+                        </div>
+                        <p class="service__description">
+                            Сообщество IT-специалистов
+                        </p>
+                    </a>
+                                    <a class="service" href="https://qna.habr.com/?utm_source=habr_account&amp;utm_medium=habr_top_panel">
+                        <div class="service__title">
+                            <svg class="qna-icon">
+                                <use href="/6970c90a/image/icons-sprite.svg#service-qna"/>
+                            </svg>
+                        </div>
+                        <p class="service__description">
+                            Ответы на любые вопросы об IT
+                        </p>
+                    </a>
+                                    <a class="service" href="https://career.habr.com/?utm_source=habr_account&amp;utm_medium=habr_top_panel">
+                        <div class="service__title">
+                            <svg class="career-icon">
+                                <use href="/6970c90a/image/icons-sprite.svg#service-career"/>
+                            </svg>
+                        </div>
+                        <p class="service__description">
+                            Профессиональное развитие в IT
+                        </p>
+                    </a>
+                            </div>
+        </div>
+            </div>
+</div>
+
+        <div class="layout__page layout__page_thin">
+            <div class="shadow-box">
+    <div class="shadow-box__title">Регистрация</div>
+
+    <div class="alert mt-4" data-fail-msg="Что-то пошло не так" hidden></div>
+
+    <form action="https://account.habr.com/ru/register/start/P2ig5gHcrxKSR-AcAeZbW74uL2IQQBZgL6C6NAUMzoL-c0R6g1H7IF9N2l-NHh50xhGo-D1kBbk_ApZMPwyPNFeASckfUCjuxXVLDt3tHHRF55DiwJUlt-U2JHqtsVq-yLbHu4W2MaKMpna-RoKHWmQyvfUneL-culFjAwiFe4nCogMrUDIraT8XeeMnEzFqCTFrUwdzn5L9S-So" method="post" class="form form_register s-form" id="register-form" autocomplete="off">
+
+        <fieldset class="form__fields">
+
+            <div class="form__field s-field">
+                <label class="form__field-label">Email</label>
+                <input type="email" name="email" value="" class="form__field-input" required>
+            </div>
+
+            <div class="form__field s-field">
+                <label class="form__field-label">Никнейм</label>
+                <input type="text" name="nickname" value="" class="form__field-input" required>
+            </div>
+
+            <div class="form__field s-field">
+                <label class="form__field-label">Пароль</label>
+                <input type="password" name="password1" class="form__field-input" required>
+            </div>
+
+            <div class="form__field s-field">
+                <label class="form__field-label">Пароль ещё раз</label>
+                <input type="password" name="password2" class="form__field-input" required>
+            </div>
+
+            <div class="form__field s-field">
+                <input type="checkbox" class="form-checkbox" id="register-agree" name="agree" required>
+                <label for="register-agree">
+                    Я принимаю условия
+                    <a href="https://account.habr.com/ru/info/agreement">Пользовательского соглашения</a>
+                </label>
+            </div>
+
+            <div class="form__field s-field">
+                <input type="checkbox" class="form-checkbox" id="register-cplcy" name="cplcy" required>
+                <label for="register-cplcy">
+                    Я согласен на обработку персональных данных в соответствии с
+                    <a href="https://account.habr.com/ru/info/confidential">Политикой конфиденциальности</a>
+                </label>
+            </div>
+
+                        <div class="form__field s-field">
+                <div data-captcha="yandex" data-sitekey="ysc1_zgWuDVpgrG9kwB8QEfIkuWseZyEnRzHLCAPF2dwh1db6e985"></div>
+            </div>
+            
+            <div class="form__buttons s-buttons">
+                <button type="submit" class="button button_wide button_primary">
+                    Регистрация
+                </button>
+            </div>
+
+        </fieldset>
+
+    </form>
+
+</div>
+
+<div class="shadow-box shadow-box_additionals">
+    <span class="form-additional-message">
+        Уже зарегистрированы?
+        <a href="https://account.habr.com/ru/ident/P2ig5gHcrxKSR-AcAeZbW74uL2IQQBZgL6C6NAUMzoL-c0R6g1H7IF9N2l-NHh50xhGo-D1kBbk_ApZMPwyPNFeASckfUCjuxXVLDt3tHHRF55DiwJUlt-U2JHqtsVq-yLbHu4W2MaKMpna-RoKHWmQyvfUneL-culFjAwiFe4nCogMrUDIraT8XeeMnEzFqCTFrUwdzn5L9S-So" class="form-additional-message__link">
+            Войдите
+        </a>
+    </span>
+</div>
+
+            <div class="layout__footer">
+    <div class="layout__footer-inner">
+        <div class="footer-links">
+            <a href="https://account.habr.com/en/register/P2ig5gHcrxKSR-AcAeZbW74uL2IQQBZgL6C6NAUMzoL-c0R6g1H7IF9N2l-NHh50xhGo-D1kBbk_ApZMPwyPNFeASckfUCjuxXVLDt3tHHRF55DiwJUlt-U2JHqtsVq-yLbHu4W2MaKMpna-RoKHWmQyvfUneL-culFjAwiFe4nCogMrUDIraT8XeeMnEzFqCTFrUwdzn5L9S-So" class="footer-links__link">
+                <svg class="footer-links__icon footer-links__icon-ball" width="16" height="16">
+                    <use href="/6970c90a/image/icons-sprite.svg#globus"/>
+                </svg>
+                English
+            </a>
+                            <a href="https://account.habr.com/ru/info/about" class="footer-links__link">О сервисе</a>
+                            <a href="https://account.habr.com/ru/support" class="footer-links__link">Обратная связь</a>
+                            <a href="https://account.habr.com/ru/info/agreement" class="footer-links__link">Соглашение</a>
+                    </div>
+    </div>
+</div>
+
+        </div>
+    </div>
+    <script src="https://assets.habr.com/account/6970c90a/script/user.js"></script>
+</body>
+</html>

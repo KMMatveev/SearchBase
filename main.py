@@ -32,8 +32,10 @@ class WebSpider:
 
         self.morph = pymorphy3.MorphAnalyzer()
         self.stopwords = self._load_russian_stopwords()
-        self.tokens_file = 'tokens.txt'
-        self.lemmas_file = 'lemmas.txt'
+        self.tokens_dir = 'tokens_output'
+
+        if not os.path.exists(self.tokens_dir):
+            os.makedirs(self.tokens_dir)
 
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -254,7 +256,6 @@ class WebSpider:
     def _extract_text_from_html(self, html_content):
         soup = BeautifulSoup(html_content, 'html.parser')
 
-        # Удаляем неинформативные теги
         for tag in soup(['script', 'style', 'meta', 'noscript', 'header', 'footer', 'nav']):
             tag.decompose()
 
@@ -273,17 +274,19 @@ class WebSpider:
     def process_downloaded_pages(self):
         print(f"\nНачинаю обработку {len(self.results)} скачанных страниц...")
 
-        all_tokens = set()
-        lemma_to_tokens = defaultdict(set)
-
         pages_dir = os.path.join(os.getcwd(), self.pages_dir)
+        processed_count = 0
 
         for result in self.results:
             filepath = os.path.join(pages_dir, result['filename'])
+            file_number = result['file_number']
 
             if not os.path.exists(filepath):
                 print(f"Файл не найден: {filepath}")
                 continue
+
+            page_output_dir = os.path.join(self.tokens_dir, f"page_{file_number:03d}")
+            os.makedirs(page_output_dir, exist_ok=True)
 
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
@@ -291,36 +294,49 @@ class WebSpider:
 
                 text = self._extract_text_from_html(html_content)
                 raw_tokens = self._tokenize_text(text)
+                all_tokens = set()
+                lemma_to_tokens = defaultdict(set)
+
                 for token in raw_tokens:
                     if self._is_valid_token(token):
                         all_tokens.add(token)
                         lemma = self._lemmatize_token(token)
                         lemma_to_tokens[lemma].add(token)
 
+                self._save_tokens_per_page(all_tokens, page_output_dir, file_number)
+                self._save_lemmas_per_page(lemma_to_tokens, page_output_dir, file_number)
+
+                processed_count += 1
+                if processed_count % 10 == 0:
+                    print(f"Обработано страниц: {processed_count}/{len(self.results)}")
+
             except Exception as e:
                 print(f"Ошибка при обработке {result['filename']}: {e}")
                 continue
 
-        self._save_tokens(all_tokens)
-        self._save_lemmas(lemma_to_tokens)
+        print(f"\nОбработано {processed_count} страниц")
+        print(f"Результаты сохранены в папке: {self.tokens_dir}/")
+        return processed_count
 
-        print(f"Готово! Обработано токенов: {len(all_tokens)}, уникальных лемм: {len(lemma_to_tokens)}")
-        return all_tokens, lemma_to_tokens
+    def _save_tokens_per_page(self, tokens_set, output_dir, file_number):
+        filepath = os.path.join(output_dir, 'tokens.txt')
 
-    def _save_tokens(self, tokens_set):
-        with open(self.tokens_file, 'w', encoding='utf-8') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             for token in sorted(tokens_set):
                 f.write(f"{token}\n")
-        print(f"Сохранено {len(tokens_set)} токенов в {self.tokens_file}")
 
-    def _save_lemmas(self, lemma_dict):
-        with open(self.lemmas_file, 'w', encoding='utf-8') as f:
-            # Сортируем по леммам
+        print(f"  ✓ Page {file_number}: {len(tokens_set)} токенов → {filepath}")
+
+    def _save_lemmas_per_page(self, lemma_dict, output_dir, file_number):
+        filepath = os.path.join(output_dir, 'lemmas.txt')
+
+        with open(filepath, 'w', encoding='utf-8') as f:
             for lemma in sorted(lemma_dict.keys()):
-                tokens = sorted(lemma_dict[lemma])  # Сортируем токены
+                tokens = sorted(lemma_dict[lemma])
                 line = f"{lemma} {' '.join(tokens)}\n"
                 f.write(line)
-        print(f"Сохранено {len(lemma_dict)} лемм в {self.lemmas_file}")
+
+        print(f"Page {file_number}: {len(lemma_dict)} лемм → {filepath}")
 
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
