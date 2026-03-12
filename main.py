@@ -9,6 +9,7 @@ import re
 import string
 from collections import defaultdict
 import pymorphy3
+import json
 
 
 class WebSpider:
@@ -36,6 +37,8 @@ class WebSpider:
 
         if not os.path.exists(self.tokens_dir):
             os.makedirs(self.tokens_dir)
+
+        self.inverted_index_json = 'inverted_index.json'
 
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -338,55 +341,372 @@ class WebSpider:
 
         print(f"Page {file_number}: {len(lemma_dict)} лемм → {filepath}")
 
+    def build_inverted_index(self, use_lemmas=True):
+
+        inverted_index = defaultdict(set)
+
+        for result in self.results:
+            file_number = result['file_number']
+
+            if use_lemmas:
+                terms_file = os.path.join(
+                    self.tokens_dir,
+                    f"page_{file_number:03d}",
+                    'lemmas.txt'
+                )
+            else:
+                terms_file = os.path.join(
+                    self.tokens_dir,
+                    f"page_{file_number:03d}",
+                    'tokens.txt'
+                )
+
+            if not os.path.exists(terms_file):
+                print(f"Файл не найден: {terms_file}")
+                continue
+
+            try:
+                with open(terms_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        if use_lemmas:
+                            term = line.split()[0]
+                        else:
+                            term = line
+
+                        inverted_index[term].add(file_number)
+
+            except Exception as e:
+                print(f"Ошибка при чтении {terms_file}: {e}")
+                continue
+
+        inverted_index = {
+            term: sorted(list(doc_ids))
+            for term, doc_ids in inverted_index.items()
+        }
+
+        self._save_inverted_index(inverted_index)
+
+        print(f"\nИнвертированный индекс построен!")
+        print(f"   Уникальных терминов: {len(inverted_index)}")
+        print(f"   Документы в индексе: {len(self.results)}")
+
+        return inverted_index
+
+    def _save_inverted_index(self, inverted_index):
+        with open(self.inverted_index_json, 'w', encoding='utf-8') as f:
+            json.dump(inverted_index, f, ensure_ascii=False, indent=2)
+
+        print(f"Сохранено в {self.inverted_index_json}")
+
+    def search_by_term(self, term, use_lemmas=True):
+        if not os.path.exists(self.inverted_index_json):
+            print("Инвертированный индекс не найден!")
+            return []
+
+        with open(self.inverted_index_json, 'r', encoding='utf-8') as f:
+            inverted_index = json.load(f)
+
+        term = term.lower()
+
+        if use_lemmas:
+            term = self._lemmatize_token(term)
+
+        if term in inverted_index:
+            doc_ids = inverted_index[term]
+            print(f"\nТермин '{term}' найден в документах: {doc_ids}")
+
+            for doc_id in doc_ids:
+                for result in self.results:
+                    if result['file_number'] == doc_id:
+                        print(f"{doc_id}: {result['url']}")
+                        break
+
+            return doc_ids
+        else:
+            print(f"\nТермин '{term}' не найден ни в одном документе")
+            return []
+
+    def search_by_multiple_terms(self, terms, operator='AND', exclude_terms=None):
+        if not os.path.exists(self.inverted_index_json):
+            print("Инвертированный индекс не найден!")
+            return []
+
+        with open(self.inverted_index_json, 'r', encoding='utf-8') as f:
+            inverted_index = json.load(f)
+
+        normalized_terms = []
+        for term in terms:
+            term = term.lower().strip()
+            if term:
+                term = self._lemmatize_token(term)
+                normalized_terms.append(term)
+
+        normalized_exclude = []
+        if exclude_terms:
+            for term in exclude_terms:
+                term = term.lower().strip()
+                if term:
+                    term = self._lemmatize_token(term)
+                    normalized_exclude.append(term)
+
+        doc_sets = []
+        for term in normalized_terms:
+            if term in inverted_index:
+                doc_sets.append(set(inverted_index[term]))
+            else:
+                doc_sets.append(set())
+
+        if not doc_sets:
+            result = set()
+        elif operator == 'AND':
+            result = set.intersection(*doc_sets)
+            print(f"\nПоиск AND: найдено {len(result)} документов")
+        elif operator == 'OR':
+            result = set.union(*doc_sets)
+            print(f"\nПоиск OR: найдено {len(result)} документов")
+        else:
+            print("Неверный оператор! Используйте 'AND' или 'OR'")
+            return []
+
+        if normalized_exclude:
+            exclude_sets = []
+            for term in normalized_exclude:
+                if term in inverted_index:
+                    exclude_sets.append(set(inverted_index[term]))
+            if exclude_sets:
+                exclude_docs = set.union(*exclude_sets)
+                result = result - exclude_docs
+                print(f"Исключено документов: {len(exclude_docs)}")
+                print(f"Итоговый результат: {len(result)} документов")
+
+        if result:
+            print("\nРезультаты:")
+            for doc_id in sorted(result):
+                for result_item in self.results:
+                    if result_item['file_number'] == doc_id:
+                        print(f"   {doc_id}: {result_item['url']}")
+                        break
+        else:
+            print("\nНичего не найдено")
+
+        return sorted(list(result))
+
+    def _get_term_docs(self, term, inverted_index):
+        term = term.lower().strip()
+        if not term:
+            return set()
+        term = self._lemmatize_token(term)
+        if term in inverted_index:
+            return set(inverted_index[term])
+        return set()
+
+    def _tokenize_query(self, query_string):
+        pattern = r'\(|\)|AND|OR|NOT|"[^"]+"|\w+'
+        tokens = re.findall(pattern, query_string, re.IGNORECASE)
+        return [token.strip() for token in tokens if token.strip() and token not in ['', ' ', '\t']]
+
+    def _parse_query_expression(self, tokens, inverted_index, depth=0):
+        if not tokens:
+            return set()
+
+        indent = "  " * depth
+        result_sets = []
+        exclude_sets = []
+        current_operator = 'OR'
+        i = 0
+
+        while i < len(tokens):
+            token = tokens[i]
+
+            if token == ')':
+                i += 1
+                continue
+
+            if token == '(':
+                depth_check = 1
+                j = i + 1
+                while j < len(tokens) and depth_check > 0:
+                    if tokens[j] == '(':
+                        depth_check += 1
+                    elif tokens[j] == ')':
+                        depth_check -= 1
+                    j += 1
+
+                sub_expression = tokens[i + 1:j - 1]
+                sub_result = self._parse_query_expression(sub_expression, inverted_index, depth + 1)
+
+                print(f"{indent}Группа найдена: {len(sub_result)} документов\n")
+
+                if current_operator == 'OR':
+                    result_sets.append(sub_result)
+                elif current_operator == 'AND':
+                    if result_sets:
+                        prev_count = len(result_sets[-1])
+                        result_sets[-1] = result_sets[-1].intersection(sub_result)
+                        print(f"{indent}AND операция: {prev_count} -> {len(result_sets[-1])} документов")
+                    else:
+                        result_sets.append(sub_result)
+                i = j
+                continue
+
+            if token.upper() == 'OR':
+                current_operator = 'OR'
+                print(f"{indent}Оператор: OR")
+                i += 1
+                continue
+
+            if token.upper() == 'AND':
+                current_operator = 'AND'
+                print(f"{indent}Оператор: AND")
+                i += 1
+                continue
+
+            if token.upper() == 'NOT':
+                # Всё, что после NOT - это исключения
+                current_operator = 'EXCLUDE'
+                print(f"{indent}Оператор: NOT (режим исключения)")
+                i += 1
+                continue
+
+            if token.startswith('-'):
+                exclude_term = token[1:]
+                if exclude_term == '(':
+                    depth_check = 1
+                    j = i + 1
+                    while j < len(tokens) and depth_check > 0:
+                        if tokens[j] == '(':
+                            depth_check += 1
+                        elif tokens[j] == ')':
+                            depth_check -= 1
+                        j += 1
+                    sub_expression = tokens[i + 2:j - 1]
+                    sub_result = self._parse_query_expression(sub_expression, inverted_index, depth + 1)
+                    exclude_sets.append(sub_result)
+                    print(f"{indent}Исключена группа (-): {len(sub_result)} документов")
+                    i = j
+                    continue
+                else:
+                    exclude_docs = self._get_term_docs(exclude_term, inverted_index)
+                    exclude_sets.append(exclude_docs)
+                    print(f"{indent}NOT операция (-): {len(exclude_docs)} документов")
+                    i += 1
+                    continue
+
+            term_docs = self._get_term_docs(token, inverted_index)
+            print(f"{indent}Термин '{token}': {len(term_docs)} документов")
+
+            if current_operator == 'EXCLUDE':
+                exclude_sets.append(term_docs)
+            elif current_operator == 'OR':
+                result_sets.append(term_docs)
+            elif current_operator == 'AND':
+                if result_sets:
+                    prev_count = len(result_sets[-1])
+                    result_sets[-1] = result_sets[-1].intersection(term_docs)
+                    print(f"{indent}AND операция: {prev_count} -> {len(result_sets[-1])} документов")
+                else:
+                    result_sets.append(term_docs)
+            i += 1
+
+        if not result_sets:
+            final_result = set()
+        else:
+            final_result = result_sets[0]
+            for idx, result_set in enumerate(result_sets[1:], 1):
+                prev_count = len(final_result)
+                final_result = final_result.union(result_set)
+                print(f"{indent}OR операция ({idx}): {prev_count} -> {len(final_result)} документов")
+
+        if exclude_sets:
+            exclude_docs = set()
+            for exc_set in exclude_sets:
+                exclude_docs = exclude_docs.union(exc_set)
+            prev_count = len(final_result)
+            final_result = final_result - exclude_docs
+            print(
+                f"{indent}NOT операция: {prev_count} -> {len(final_result)} документов (исключено {len(exclude_docs)})")
+
+        print(f"{indent}Итог выражения: {len(final_result)} документов")
+        return final_result
+
+    def _print_search_results(self, doc_ids):
+        if not doc_ids:
+            print("\nНичего не найдено")
+            return
+
+        print(f"\nНайдено {len(doc_ids)} документов:")
+        for doc_id in sorted(doc_ids):
+            for result_item in self.results:
+                if result_item['file_number'] == doc_id:
+                    print(f"   {doc_id}: {result_item['url']}")
+                    break
+
+    def get_term_statistics(self, top_n=20):
+        if not os.path.exists(self.inverted_index_json):
+            print("Инвертированный индекс не найден!")
+            return {}
+
+        with open(self.inverted_index_json, 'r', encoding='utf-8') as f:
+            inverted_index = json.load(f)
+        term_freq = {
+            term: len(doc_ids)
+            for term, doc_ids in inverted_index.items()
+        }
+        sorted_terms = sorted(term_freq.items(), key=lambda x: x[1], reverse=True)
+        print(f"\nПервые {top_n} терминов по частотности в документах:")
+        for i, (term, freq) in enumerate(sorted_terms[:top_n], 1):
+            print(f"{i:3}. {term:30} → {freq} док.")
+
+        return {
+            'total_terms': len(term_freq),
+            'top_terms': sorted_terms[:top_n],
+            'avg_docs_per_term': sum(term_freq.values()) / len(term_freq) if term_freq else 0
+        }
+
+    def search_query(self, query_string):
+        if not query_string or not query_string.strip():
+            print("Пустой поисковый запрос!")
+            return []
+
+        if not os.path.exists(self.inverted_index_json):
+            print("Инвертированный индекс не найден!")
+            return []
+
+        print(f"\nПоисковый запрос: \"{query_string}\"")
+        tokens = self._tokenize_query(query_string)
+
+        if not tokens:
+            return []
+
+        with open(self.inverted_index_json, 'r', encoding='utf-8') as f:
+            inverted_index = json.load(f)
+        result_docs = self._parse_query_expression(tokens, inverted_index, depth=0)
+        self._print_search_results(result_docs)
+
+        return sorted(list(result_docs))
+
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
     MIN_PAGES = 150
     MAX_DEPTH = 3
 
-    print(f"Начальный URL: {START_URL}")
-    print(f"Цель: {MIN_PAGES} страниц")
-    print(f"Максимальная глубина: {MAX_DEPTH} уровней")
+    #print(f"Начальный URL: {START_URL}")
+    #print(f"Цель: {MIN_PAGES} страниц")
+    #print(f"Максимальная глубина: {MAX_DEPTH} уровней")
 
     spider = WebSpider(START_URL, min_pages=MIN_PAGES, max_depth=MAX_DEPTH)
-    spider.crawl()
+    #spider.crawl()
 
-    spider.process_downloaded_pages()
+    #spider.process_downloaded_pages()
+
+    #spider.build_inverted_index()
+    spider.search_query("(SSO AND python) OR ИИ NOT (git OR кабан)")
+    spider.search_query("ИТ OR ИП")
+
+    spider.search_query("git -python")
 
     print("Всё!")
-
-"""
-Бро, я кратко попытался описать:
-
-1. Init:
-   - Создаётся объект класса WebSpider с указанным начальным URL
-   - Загружаются данные о ранее скачанных страницах (если есть)
-   - Создаётся очередь для обхода сайта
-
-2. Сам обход сайта (BFS(beautiful soup) - поиск в ширину):
-   - Берём первую ссылку из очереди
-   - Скачиваем страницу по этой ссылке
-   - Сохраняем HTML-код в файл
-   - Извлекаем все ссылки со страницы
-   - Добавляем новые ссылки в очередь с увеличенной глубиной
-   - Повторяем до достижения цели (150 страниц) или исчерпания ссылок
-
-3. Очеред обработки:
-   Каждый элемент очереди содержит:
-   - url: адрес страницы для скачивания
-   - depth: глубина обхода (0, 1, 2, 3)
-   - parent_url: ссылка на страницу, откуда была извлечена эта ссылка
-
-4. Сохранение:
-   - Каждая страница сохраняется как page_N.html в папку downloaded_pages
-   - Информация о страницах сохраняется в двух файлах:
-     * index.txt - простой список "номер ссылка"
-     * results.csv - таблица с колонками: номер, ссылка, имя файла, родительская страница(это я от себя добавил, по идее не нужно)
-
-5. Проверка повторов:
-   - Используется множество visited_urls для отслеживания уже посещённых страниц
-   - Ссылки проверяются на валидность (не медиафайлы, внутренние ссылки сайта)
-
-6. Ограничения задаются в мейне:
-   - Максимум страниц
-   - Глубина обхода не более X уровней
-"""
