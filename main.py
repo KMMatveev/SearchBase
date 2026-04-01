@@ -10,6 +10,8 @@ import string
 from collections import defaultdict
 import pymorphy3
 import json
+import math
+from collections import Counter
 
 
 class WebSpider:
@@ -39,6 +41,11 @@ class WebSpider:
             os.makedirs(self.tokens_dir)
 
         self.inverted_index_json = 'inverted_index.json'
+
+        self.tfidf_dir = 'tfidf_output'
+
+        if not os.path.exists(self.tfidf_dir):
+            os.makedirs(self.tfidf_dir)
 
         signal.signal(signal.SIGINT, self.signal_handler)
 
@@ -689,6 +696,247 @@ class WebSpider:
 
         return sorted(list(result_docs))
 
+    #Задание 4
+    def _calculate_tf(self, tokens):
+        term_counts = Counter(tokens)
+        total_terms = len(tokens)
+
+        if total_terms == 0:
+            return {}
+
+        tf = {}
+        for term, count in term_counts.items():
+            tf[term] = count / total_terms
+
+        return tf
+
+    def _calculate_idf(self, term, total_docs, docs_with_term):
+        if docs_with_term == 0:
+            return 0.0
+
+        idf = math.log(total_docs / docs_with_term)
+        return idf
+
+    def _calculate_tfidf(self, tf, idf):
+        return tf * idf
+
+    def _build_corpus_stats(self):
+        term_doc_count = Counter()
+        lemma_doc_count = Counter()
+
+        for result in self.results:
+            file_number = result['file_number']
+            tokens_file = os.path.join(
+                self.tokens_dir,
+                f"page_{file_number:03d}",
+                'tokens.txt'
+            )
+            lemmas_file = os.path.join(
+                self.tokens_dir,
+                f"page_{file_number:03d}",
+                'lemmas.txt'
+            )
+
+            doc_terms = set()
+            doc_lemmas = set()
+
+            if os.path.exists(tokens_file):
+                with open(tokens_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        term = line.strip()
+                        if term:
+                            doc_terms.add(term)
+
+            if os.path.exists(lemmas_file):
+                with open(lemmas_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if parts:
+                            lemma = parts[0]
+                            doc_lemmas.add(lemma)
+
+            for term in doc_terms:
+                term_doc_count[term] += 1
+
+            for lemma in doc_lemmas:
+                lemma_doc_count[lemma] += 1
+
+        return term_doc_count, lemma_doc_count
+
+    def _extract_raw_tokens_from_html(self, html_content):
+        text = self._extract_text_from_html(html_content)
+        tokens = self._tokenize_text(text)
+        filtered_tokens = []
+        for token in tokens:
+            if self._is_valid_token(token):
+                filtered_tokens.append(token)
+        return filtered_tokens
+
+    def _extract_raw_lemmas_from_html(self, html_content):
+        tokens = self._extract_raw_tokens_from_html(html_content)
+        lemmas = []
+        for token in tokens:
+            lemma = self._lemmatize_token(token)
+            lemmas.append(lemma)
+        return lemmas
+
+    def process_tfidf(self):
+        print("\nРасчет TF-IDF для всех документов...")
+
+        total_docs = len(self.results)
+
+        if total_docs == 0:
+            print("Нет документов для обработки!")
+            return
+
+        term_doc_count, lemma_doc_count = self._build_corpus_stats()
+
+        print(f"Всего документов: {total_docs}")
+        print(f"Уникальных терминов в корпусе: {len(term_doc_count)}")
+        print(f"Уникальных лемм в корпусе: {len(lemma_doc_count)}")
+
+        pages_dir = os.path.join(os.getcwd(), self.pages_dir)
+        processed_count = 0
+
+        for result in self.results:
+            file_number = result['file_number']
+            filepath = os.path.join(pages_dir, result['filename'])
+
+            if not os.path.exists(filepath):
+                print(f"Файл не найден: {filepath}")
+                continue
+
+            page_output_dir = os.path.join(self.tfidf_dir, f"page_{file_number:03d}")
+            os.makedirs(page_output_dir, exist_ok=True)
+
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+
+                raw_tokens = self._extract_raw_tokens_from_html(html_content)
+                raw_lemmas = self._extract_raw_lemmas_from_html(html_content)
+
+                tf_tokens = self._calculate_tf(raw_tokens)
+                tf_lemmas = self._calculate_tf(raw_lemmas)
+
+                tfidf_tokens = {}
+                for term, tf in tf_tokens.items():
+                    docs_with_term = term_doc_count.get(term, 0)
+                    idf = self._calculate_idf(term, total_docs, docs_with_term)
+                    tfidf = self._calculate_tfidf(tf, idf)
+                    tfidf_tokens[term] = (idf, tfidf)
+
+                tfidf_lemmas = {}
+                for lemma, tf in tf_lemmas.items():
+                    docs_with_lemma = lemma_doc_count.get(lemma, 0)
+                    idf = self._calculate_idf(lemma, total_docs, docs_with_lemma)
+                    tfidf = self._calculate_tfidf(tf, idf)
+                    tfidf_lemmas[lemma] = (idf, tfidf)
+
+                self._save_tfidf_tokens(tfidf_tokens, page_output_dir, file_number)
+                self._save_tfidf_lemmas(tfidf_lemmas, page_output_dir, file_number)
+
+                processed_count += 1
+                if processed_count % 10 == 0:
+                    print(f"Обработано страниц: {processed_count}/{len(self.results)}")
+
+            except Exception as e:
+                print(f"Ошибка при обработке {result['filename']}: {e}")
+                continue
+
+        print(f"\nГотово! Обработано {processed_count} страниц")
+        print(f"Результаты сохранены в папке: {self.tfidf_dir}/")
+        return processed_count
+
+    def _save_tfidf_tokens(self, tfidf_data, output_dir, file_number):
+        filepath = os.path.join(output_dir, 'tfidf_tokens.txt')
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            for term in sorted(tfidf_data.keys()):
+                idf, tfidf = tfidf_data[term]
+                f.write(f"{term} {idf:.6f} {tfidf:.6f}\n")
+
+        print(f"  Page {file_number}: {len(tfidf_data)} терминов -> {filepath}")
+
+    def _save_tfidf_lemmas(self, tfidf_data, output_dir, file_number):
+        filepath = os.path.join(output_dir, 'tfidf_lemmas.txt')
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            for lemma in sorted(tfidf_data.keys()):
+                idf, tfidf = tfidf_data[lemma]
+                f.write(f"{lemma} {idf:.6f} {tfidf:.6f}\n")
+
+        print(f"  Page {file_number}: {len(tfidf_data)} лемм -> {filepath}")
+
+    def get_tfidf_statistics(self):
+        print("\nСтатистика TF-IDF по корпусу:")
+        print("=" * 50)
+
+        all_tfidf_tokens = []
+        all_tfidf_lemmas = []
+
+        for result in self.results:
+            file_number = result['file_number']
+            tokens_file = os.path.join(
+                self.tfidf_dir,
+                f"page_{file_number:03d}",
+                'tfidf_tokens.txt'
+            )
+            lemmas_file = os.path.join(
+                self.tfidf_dir,
+                f"page_{file_number:03d}",
+                'tfidf_lemmas.txt'
+            )
+
+            if os.path.exists(tokens_file):
+                with open(tokens_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 3:
+                            all_tfidf_tokens.append(float(parts[2]))
+
+            if os.path.exists(lemmas_file):
+                with open(lemmas_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) >= 3:
+                            all_tfidf_lemmas.append(float(parts[2]))
+
+        if all_tfidf_tokens:
+            avg_tfidf_tokens = sum(all_tfidf_tokens) / len(all_tfidf_tokens)
+            max_tfidf_tokens = max(all_tfidf_tokens)
+            min_tfidf_tokens = min(all_tfidf_tokens)
+            print(f"Термины:")
+            print(f"  Средний TF-IDF: {avg_tfidf_tokens:.6f}")
+            print(f"  Максимальный TF-IDF: {max_tfidf_tokens:.6f}")
+            print(f"  Минимальный TF-IDF: {min_tfidf_tokens:.6f}")
+            print(f"  Всего значений: {len(all_tfidf_tokens)}")
+
+        if all_tfidf_lemmas:
+            avg_tfidf_lemmas = sum(all_tfidf_lemmas) / len(all_tfidf_lemmas)
+            max_tfidf_lemmas = max(all_tfidf_lemmas)
+            min_tfidf_lemmas = min(all_tfidf_lemmas)
+            print(f"\nЛеммы:")
+            print(f"  Средний TF-IDF: {avg_tfidf_lemmas:.6f}")
+            print(f"  Максимальный TF-IDF: {max_tfidf_lemmas:.6f}")
+            print(f"  Минимальный TF-IDF: {min_tfidf_lemmas:.6f}")
+            print(f"  Всего значений: {len(all_tfidf_lemmas)}")
+
+        return {
+            'tokens': {
+                'avg': avg_tfidf_tokens if all_tfidf_tokens else 0,
+                'max': max_tfidf_tokens if all_tfidf_tokens else 0,
+                'min': min_tfidf_tokens if all_tfidf_tokens else 0,
+                'count': len(all_tfidf_tokens)
+            },
+            'lemmas': {
+                'avg': avg_tfidf_lemmas if all_tfidf_lemmas else 0,
+                'max': max_tfidf_lemmas if all_tfidf_lemmas else 0,
+                'min': min_tfidf_lemmas if all_tfidf_lemmas else 0,
+                'count': len(all_tfidf_lemmas)
+            }
+        }
+
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
     MIN_PAGES = 150
@@ -704,9 +952,12 @@ if __name__ == "__main__":
     #spider.process_downloaded_pages()
 
     #spider.build_inverted_index()
-    spider.search_query("(SSO AND python) OR ИИ NOT (git OR кабан)")
-    spider.search_query("ИТ OR ИП")
+    # spider.search_query("(SSO AND python) OR ИИ NOT (git OR кабан)")
+    # spider.search_query("ИТ OR ИП")
+    #
+    # spider.search_query("git -python")
 
-    spider.search_query("git -python")
+    spider.process_tfidf()
+    spider.get_tfidf_statistics()
 
     print("Всё!")
