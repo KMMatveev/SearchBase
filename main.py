@@ -47,6 +47,8 @@ class WebSpider:
         if not os.path.exists(self.tfidf_dir):
             os.makedirs(self.tfidf_dir)
 
+        self.vector_index_file = 'vector_index.json'
+
         signal.signal(signal.SIGINT, self.signal_handler)
 
     def load_existing_data(self):
@@ -937,27 +939,228 @@ class WebSpider:
             }
         }
 
+    def _build_vector_index(self):
+        vector_index = {}
+
+        for result in self.results:
+            file_number = result['file_number']
+            tfidf_file = os.path.join(
+                self.tfidf_dir,
+                f"page_{file_number:03d}",
+                'tfidf_lemmas.txt'
+            )
+
+            if not os.path.exists(tfidf_file):
+                continue
+
+            doc_vector = {}
+            with open(tfidf_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 3:
+                        lemma = parts[0]
+                        tfidf = float(parts[2])
+                        doc_vector[lemma] = tfidf
+
+            vector_index[file_number] = doc_vector
+
+        return vector_index
+
+    def _cosine_similarity(self, vec1, vec2):
+        intersection = set(vec1.keys()) & set(vec2.keys())
+
+        if not intersection:
+            return 0.0
+
+        numerator = sum(vec1[term] * vec2[term] for term in intersection)
+
+        sum1 = sum(val ** 2 for val in vec1.values())
+        sum2 = sum(val ** 2 for val in vec2.values())
+
+        denominator = math.sqrt(sum1) * math.sqrt(sum2)
+
+        if denominator == 0:
+            return 0.0
+
+        return numerator / denominator
+
+    def _create_query_vector(self, query_terms, total_docs, term_doc_count):
+        query_vector = {}
+
+        for term in query_terms:
+            term = term.lower().strip()
+            if not term:
+                continue
+
+            term = self._lemmatize_token(term)
+
+            docs_with_term = term_doc_count.get(term, 0)
+            idf = self._calculate_idf(term, total_docs, docs_with_term)
+
+            tf = 1.0
+            tfidf = self._calculate_tfidf(tf, idf)
+
+            if tfidf > 0:
+                query_vector[term] = tfidf
+
+        return query_vector
+
+    def _extract_snippet(self, html_content, query_terms, max_length=200):
+        text = self._extract_text_from_html(html_content)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        query_terms_lower = [term.lower() for term in query_terms]
+
+        best_start = 0
+        best_score = 0
+
+        for i in range(0, len(text) - max_length, 50):
+            chunk = text[i:i + max_length].lower()
+            score = sum(1 for term in query_terms_lower if term in chunk)
+
+            if score > best_score:
+                best_score = score
+                best_start = i
+
+        if best_start > 0:
+            snippet_start = text.rfind(' ', 0, best_start + 50)
+            if snippet_start == -1:
+                snippet_start = best_start
+        else:
+            snippet_start = 0
+
+        snippet_end = snippet_start + max_length
+        if snippet_end < len(text):
+            snippet_end = text.rfind(' ', snippet_start, snippet_end)
+            if snippet_end == -1:
+                snippet_end = snippet_start + max_length
+
+        snippet = text[snippet_start:snippet_end].strip()
+
+        for term in query_terms_lower:
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+            snippet = pattern.sub(f'<mark>{term}</mark>', snippet)
+
+        if snippet_start > 0:
+            snippet = '...' + snippet
+        if snippet_end < len(text):
+            snippet = snippet + '...'
+
+        return snippet
+
+    def vector_search(self, query_string, page=1, per_page=10):
+        if not os.path.exists(self.inverted_index_json):
+            return {'error': 'Инвертированный индекс не найден', 'results': []}
+
+        if not os.path.exists(self.vector_index_file):
+            vector_index = self._build_vector_index()
+            with open(self.vector_index_file, 'w', encoding='utf-8') as f:
+                json.dump(vector_index, f, ensure_ascii=False, indent=2)
+        else:
+            with open(self.vector_index_file, 'r', encoding='utf-8') as f:
+                vector_index = json.load(f)
+
+        with open(self.inverted_index_json, 'r', encoding='utf-8') as f:
+            inverted_index = json.load(f)
+
+        total_docs = len(self.results)
+        term_doc_count, _ = self._build_corpus_stats()
+
+        query_terms = self._tokenize_query(query_string)
+
+        has_operators = any(t.upper() in ['AND', 'OR', 'NOT', '(', ')'] for t in query_terms)
+
+        if has_operators:
+            candidate_docs = self._parse_query_expression(query_terms, inverted_index, depth=0)
+            print(f"Булев поиск: найдено {len(candidate_docs)} документов-кандидатов")
+        else:
+            candidate_docs = set(int(doc_id) if isinstance(doc_id, str) else doc_id
+                                 for doc_id in vector_index.keys())
+
+        if not candidate_docs:
+            return {'error': 'Ничего не найдено', 'results': []}
+
+        clean_terms = [t for t in query_terms if t.upper() not in ['AND', 'OR', 'NOT', '(', ')']
+                       and not t.startswith('-')]
+
+        if not clean_terms:
+            return {'error': 'Пустой запрос', 'results': []}
+
+        query_vector = self._create_query_vector(clean_terms, total_docs, term_doc_count)
+
+        if not query_vector:
+            return {'error': 'Не удалось создать вектор запроса', 'results': []}
+
+        scores = []
+
+        for doc_id, doc_vector in vector_index.items():
+            doc_id_int = int(doc_id) if isinstance(doc_id, str) else doc_id
+
+            if doc_id_int not in candidate_docs:
+                continue
+
+            similarity = self._cosine_similarity(query_vector, doc_vector)
+
+            if similarity > 0:
+                result_data = next((r for r in self.results if r['file_number'] == doc_id_int), None)
+
+                scores.append({
+                    'file_number': doc_id_int,
+                    'similarity': similarity,
+                    'url': result_data['url'] if result_data else '',
+                    'filename': result_data['filename'] if result_data else ''
+                })
+
+        scores.sort(key=lambda x: x['similarity'], reverse=True)
+
+        total_results = len(scores)
+        total_pages = math.ceil(total_results / per_page) if total_results > 0 else 0
+
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_results = scores[start_idx:end_idx]
+
+        pages_dir = os.path.join(os.getcwd(), self.pages_dir)
+
+        for result in paginated_results:
+            filepath = os.path.join(pages_dir, result['filename'])
+            if os.path.exists(filepath):
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                result['snippet'] = self._extract_snippet(html_content, clean_terms)
+            else:
+                result['snippet'] = 'Контекст недоступен'
+
+        return {
+            'query': query_string,
+            'total_results': total_results,
+            'total_pages': total_pages,
+            'current_page': page,
+            'per_page': per_page,
+            'results': paginated_results
+        }
+
+    def run_web_server(self, host='0.0.0.0', port=5000, debug=False):
+        """Запуск веб-сервера для поиска"""
+        from web_server import run_server
+        run_server(self, host=host, port=port, debug=debug)
+
 if __name__ == "__main__":
     START_URL = "https://habr.com/ru/news/1000374/"
     MIN_PAGES = 150
     MAX_DEPTH = 3
 
-    #print(f"Начальный URL: {START_URL}")
-    #print(f"Цель: {MIN_PAGES} страниц")
-    #print(f"Максимальная глубина: {MAX_DEPTH} уровней")
+    print(f"Начальный URL: {START_URL}")
+    print(f"Цель: {MIN_PAGES} страниц")
+    print(f"Максимальная глубина: {MAX_DEPTH} уровней")
 
     spider = WebSpider(START_URL, min_pages=MIN_PAGES, max_depth=MAX_DEPTH)
-    #spider.crawl()
 
-    #spider.process_downloaded_pages()
+    # spider.crawl()
+    # spider.process_downloaded_pages()
+    # spider.build_inverted_index()
+    # spider.process_tfidf()
 
-    #spider.build_inverted_index()
-    # spider.search_query("(SSO AND python) OR ИИ NOT (git OR кабан)")
-    # spider.search_query("ИТ OR ИП")
-    #
-    # spider.search_query("git -python")
-
-    spider.process_tfidf()
-    spider.get_tfidf_statistics()
+    spider.run_web_server(host='localhost', port=7020, debug=True)
 
     print("Всё!")

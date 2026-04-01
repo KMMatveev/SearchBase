@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Поисковая система</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .search-box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .search-box h1 { color: #333; margin-bottom: 20px; text-align: center; }
+        .search-form { display: flex; gap: 10px; }
+        .search-input { flex: 1; padding: 12px 16px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+        .search-input:focus { border-color: #4285f4; }
+        .search-button { padding: 12px 24px; font-size: 16px; background-color: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .search-button:hover { background-color: #3367d6; }
+        .results { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .result-info { color: #666; margin-bottom: 20px; font-size: 14px; }
+        .result-item { padding: 15px 0; border-bottom: 1px solid #eee; }
+        .result-item:last-child { border-bottom: none; }
+        .result-url { color: #1a0dab; text-decoration: none; font-size: 18px; display: block; margin-bottom: 5px; }
+        .result-url:hover { text-decoration: underline; }
+        .result-snippet { color: #545454; font-size: 14px; line-height: 1.5; }
+        .result-snippet mark { background-color: #ffeb3b; padding: 1px 2px; }
+        .result-score { color: #999; font-size: 12px; margin-top: 5px; }
+        .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; flex-wrap: wrap; }
+        .pagination a, .pagination span { padding: 8px 12px; text-decoration: none; color: #4285f4; border: 1px solid #ddd; border-radius: 4px; }
+        .pagination a:hover { background-color: #f5f5f5; }
+        .pagination .current { background-color: #4285f4; color: white; border-color: #4285f4; }
+        .pagination .disabled { color: #ccc; pointer-events: none; }
+        .no-results { text-align: center; color: #666; padding: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="search-box">
+            <h1>Поисковая система</h1>
+            <form class="search-form" action="/search" method="get">
+                <input type="text" name="q" class="search-input" placeholder="Введите поисковый запрос..." value="{{ query if query else '' }}">
+                <button type="submit" class="search-button">Найти</button>
+            </form>
+        </div>
+
+        {% if results %}
+            {% if results.error %}
+                <div class="results"><div class="no-results">{{ results.error }}</div></div>
+            {% elif results.results %}
+                <div class="results">
+                    <div class="result-info">Найдено {{ results.total_results }} документов (страница {{ results.current_page }} из {{ results.total_pages }})</div>
+                    {% for result in results.results %}
+                        <div class="result-item">
+                            <a href="{{ result.url }}" class="result-url" target="_blank">{{ result.url }}</a>
+                            <div class="result-snippet">{{ result.snippet | safe }}</div>
+                            <div class="result-score">Релевантность: {{ "%.4f" | format(result.similarity) }}</div>
+                        </div>
+                    {% endfor %}
+                    <div class="pagination">
+                        {% if results.current_page > 1 %}
+                            <a href="/search?q={{ query }}&page={{ results.current_page - 1 }}">Назад</a>
+                        {% else %}
+                            <span class="disabled">Назад</span>
+                        {% endif %}
+                        {% for p in range(1, results.total_pages + 1) %}
+                            {% if p == results.current_page %}
+                                <span class="current">{{ p }}</span>
+                            {% elif p == 1 or p == results.total_pages or (p >= results.current_page - 2 and p <= results.current_page + 2) %}
+                                <a href="/search?q={{ query }}&page={{ p }}">{{ p }}</a>
+                            {% elif p == results.current_page - 3 or p == results.current_page + 3 %}
+                                <span>...</span>
+                            {% endif %}
+                        {% endfor %}
+                        {% if results.current_page < results.total_pages %}
+                            <a href="/search?q={{ query }}&page={{ results.current_page + 1 }}">Вперёд</a>
+                        {% else %}
+                            <span class="disabled">Вперёд</span>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <div class="results"><div class="no-results">Ничего не найдено по запросу "{{ query }}"</div></div>
+            {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>
