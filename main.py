@@ -747,7 +747,7 @@ class WebSpider:
                     for line in f:
                         term = line.strip()
                         if term:
-                            doc_terms.add(term)
+                            doc_terms.add(term.lower())
 
             if os.path.exists(lemmas_file):
                 with open(lemmas_file, 'r', encoding='utf-8') as f:
@@ -755,7 +755,7 @@ class WebSpider:
                         parts = line.strip().split()
                         if parts:
                             lemma = parts[0]
-                            doc_lemmas.add(lemma)
+                            doc_lemmas.add(lemma.lower())
 
             for term in doc_terms:
                 term_doc_count[term] += 1
@@ -995,7 +995,7 @@ class WebSpider:
             term = self._lemmatize_token(term)
 
             docs_with_term = term_doc_count.get(term, 0)
-            idf = self._calculate_idf(term, total_docs, docs_with_term)
+            idf = self._calculate_idf(term.lower(), total_docs, docs_with_term)
 
             tf = 1.0
             tfidf = self._calculate_tfidf(tf, idf)

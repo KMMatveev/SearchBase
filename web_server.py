@@ -80,4 +80,4 @@ def run_server(spider, host='0.0.0.0', port=5000, debug=False):
     print(f"URL: http://localhost:{port}")
     print(f"Нажмите Ctrl+C для остановки\n")
 
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
